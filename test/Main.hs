@@ -13,6 +13,7 @@ import System.Directory
   , createDirectoryIfMissing
   , doesDirectoryExist
   , doesFileExist
+  , removeFile
   , findExecutable
   , getTemporaryDirectory
   , listDirectory
@@ -26,6 +27,7 @@ import System.Process (CreateProcess (..), callProcess, getCurrentPid, proc, rea
 
 import Distribution.Client.Buck2.Cache (cacheBlock, spliceBlock)
 import Distribution.Client.Buck2.Fingerprint (ccFingerprintOf, fingerprintOf)
+import Distribution.Client.Buck2.Version (cabalBuck2Version)
 
 main :: IO ()
 main = do
@@ -60,6 +62,7 @@ tests =
   , ("source-deps", sourceDeps)
   , ("custom-setup", customSetup)
   , ("reexports", reexports)
+  , ("buck2-version", buck2Version)
   ]
 
 -- | A copy of a fixture project, and how to run @cabal-buck2@ in it.
@@ -86,10 +89,13 @@ runTest exe (name, test) = do
     fixture = case name of
       "disabled-stanzas" -> "basic"
       "cache-config" -> "basic"
+      "buck2-version" -> "basic"
       _ -> name
     setup dir = do
       cleanup dir
       copyTree ("test" </> "fixtures" </> fixture) (dir </> "project")
+      -- What a checkout of the right branch of haskell-buck2 has.
+      writeBuck2Version (dir </> "project") cabalBuck2Version
       env <- getEnvironment
       -- The compiler to use: $HC if it's set (as haskell-ci does), otherwise
       -- whatever `ghc` is on the PATH.
@@ -113,6 +119,10 @@ runTest exe (name, test) = do
     cleanup dir = do
       exists <- doesDirectoryExist dir
       when exists $ removeDirectoryRecursive dir
+
+writeBuck2Version :: FilePath -> String -> IO ()
+writeBuck2Version projectDir' version =
+  writeFile (projectDir' </> "buck2" </> "version.bzl") ("CABAL_BUCK2_VERSION = \"" ++ version ++ "\"\n")
 
 copyTree :: FilePath -> FilePath -> IO ()
 copyTree from to = do
@@ -414,6 +424,28 @@ reexports project = do
   userBzl <- readIn project ("user" </> "BUCK.cabal.bzl")
   assertContains "user/BUCK.cabal.bzl" "'package': 're-lib'" userBzl
   assertNotContains "user/BUCK.cabal.bzl" "base-lib" userBzl
+
+-- | The checkout of haskell-buck2 has to be for this release of cabal-buck2:
+-- if it is not, or doesn't say, the error says which branch is needed.
+buck2Version :: Project -> IO ()
+buck2Version project = do
+  let wrong (code', msg) = when (code' == ExitSuccess) $ failure ("accepted: " ++ msg)
+  -- An earlier release didn't have a version.bzl.
+  removeFile (projectDir project </> "buck2" </> "version.bzl")
+  (code, out) <- runBuck2 project []
+  wrong (code, "buck2/ with no version")
+  assertContains "no version" ("needs the " ++ cabalBuck2Version ++ " branch") out
+  assertContains "no version" "buck2/ is for no release" out
+  assertContains "no version" "git -C buck2 checkout " out
+
+  writeBuck2Version (projectDir project) "0.0.0.1"
+  (code', out') <- runBuck2 project []
+  wrong (code', "buck2/ for another release")
+  assertContains "other version" ("This is cabal-buck2 " ++ cabalBuck2Version ++ ", and buck2/ is for cabal-buck2 0.0.0.1.") out'
+
+  writeBuck2Version (projectDir project) cabalBuck2Version
+  _ <- buck2 project []
+  return ()
 
 -- | A package with a @Custom@ build type needs its @Setup.hs@ to be run, which
 -- is not done: it, and what depends on it, can't be built.

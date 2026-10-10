@@ -30,6 +30,7 @@ import Distribution.Client.Buck2.Generate
 import Distribution.Client.Buck2.LocalPackages (BuiltPackage (..), rootRelativeDir)
 import Distribution.Client.Buck2.Spec
 import Distribution.Client.Buck2.Starlark
+import Distribution.Client.Buck2.Version (cabalBuck2Version)
 
 -- | Writes the following files for each package:
 --
@@ -167,7 +168,7 @@ renderGeneratedBzl pkgName spec =
 specValue :: BuildSpec -> Value
 specValue spec =
   VDict $
-    [ ("schema", VInt specSchemaVersion)
+    [ ("cabal_buck2", str cabalBuck2Version)
     , ("package", VDict [("name", str (specPackageName spec)), ("version", str (specPackageVersion spec)), ("dir", str (specPackageDir spec))])
     ]
       ++ listField "ghc_options" (specGhcOptions spec)

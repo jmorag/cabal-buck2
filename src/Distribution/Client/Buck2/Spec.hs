@@ -3,8 +3,7 @@
 -- "Distribution.Client.Buck2.Write" writes the spec into the
 -- @BUCK.cabal.bzl@ file.
 module Distribution.Client.Buck2.Spec
-  ( specSchemaVersion
-  , BuildSpec (..)
+  ( BuildSpec (..)
   , ComponentKind (..)
   , kindName
   , SpecComponent (..)
@@ -16,11 +15,6 @@ module Distribution.Client.Buck2.Spec
 
 import Distribution.Client.Compat.Prelude
 import Prelude ()
-
--- | The version of the build spec format; must match @SCHEMA_VERSION@ in
--- buck2\/cabal.bzl.
-specSchemaVersion :: Int
-specSchemaVersion = 1
 
 -- | A package's build spec: everything the generated rules are built from
 -- that comes from Cabal rather than from buck2 conventions.
