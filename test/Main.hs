@@ -13,6 +13,7 @@ import System.Directory
   , createDirectoryIfMissing
   , doesDirectoryExist
   , doesFileExist
+  , removeFile
   , findExecutable
   , getTemporaryDirectory
   , listDirectory
@@ -26,6 +27,7 @@ import System.Process (CreateProcess (..), callProcess, getCurrentPid, proc, rea
 
 import Distribution.Client.Buck2.Cache (cacheBlock, spliceBlock)
 import Distribution.Client.Buck2.Fingerprint (ccFingerprintOf, fingerprintOf)
+import Distribution.Client.Buck2.Version (cabalBuck2Version)
 
 main :: IO ()
 main = do
@@ -60,6 +62,7 @@ tests =
   , ("source-deps", sourceDeps)
   , ("custom-setup", customSetup)
   , ("reexports", reexports)
+  , ("buck2-version", buck2Version)
   ]
 
 -- | A copy of a fixture project, and how to run @cabal-buck2@ in it.
@@ -86,10 +89,13 @@ runTest exe (name, test) = do
     fixture = case name of
       "disabled-stanzas" -> "basic"
       "cache-config" -> "basic"
+      "buck2-version" -> "basic"
       _ -> name
     setup dir = do
       cleanup dir
       copyTree ("test" </> "fixtures" </> fixture) (dir </> "project")
+      -- What a checkout of the right branch of haskell-buck2 has.
+      writeBuck2Version (dir </> "project") cabalBuck2Version
       env <- getEnvironment
       -- The compiler to use: $HC if it's set (as haskell-ci does), otherwise
       -- whatever `ghc` is on the PATH.
@@ -113,6 +119,10 @@ runTest exe (name, test) = do
     cleanup dir = do
       exists <- doesDirectoryExist dir
       when exists $ removeDirectoryRecursive dir
+
+writeBuck2Version :: FilePath -> String -> IO ()
+writeBuck2Version projectDir' version =
+  writeFile (projectDir' </> "buck2" </> "version.bzl") ("CABAL_BUCK2_VERSION = \"" ++ version ++ "\"\n")
 
 copyTree :: FilePath -> FilePath -> IO ()
 copyTree from to = do
@@ -382,10 +392,9 @@ sourceDeps project = do
 
 -- | @reexported-modules@: a module re-exported from another package (by name
 -- or found in a dependency, renamed or not) or from another library of the
--- package is recorded in the spec with where it comes from, which is how the
+-- package is resolved as Cabal does, and recorded in the spec with where it comes from, which is how the
 -- library claims it - so that a package that depends on the library, and not
--- on where the module is from, can import it. A module that is renamed from
--- the library itself is a module of its own that re-exports it.
+-- on where the module is from, can import it. A module of the library itself is recorded without a library.
 reexports :: Project -> IO ()
 reexports project = do
   _ <- buck2 project []
@@ -395,16 +404,48 @@ reexports project = do
   re "'module': 'Orig.A',\n                    'original': 'Orig.A',\n                    'from': {\n                        'package': 'base-lib',\n                        'dir': 'base-lib'," reBzl
   re "'module': 'New.B',\n                    'original': 'Orig.B'," reBzl
   re "'module': 'Sub.M',\n                    'original': 'Sub.M',\n                    'from': {\n                        'package': 're-lib',\n                        'library': 'sub'," reBzl
-  assertNotContains "re-lib/BUCK.cabal.bzl" "'module': 'New.X'" reBzl
-  -- Not exported by another library: a module of its own.
-  re "'New.X': {\n                    'autogen'" reBzl
-  shim <- readIn project ("re-lib" </> "cabal-buck2" </> "autogen" </> "reexports" </> "re-lib" </> "New" </> "X.hs")
-  assertContains "the New.X module" "module New.X (module Own.X) where" shim
+  -- One of its own modules has no library it comes from, and no module of its own.
+  re "'module': 'New.X',\n                    'original': 'Own.X',\n                }," reBzl
+  assertNotContains "re-lib/BUCK.cabal.bzl" "'New.X': {" reBzl
+
+  -- What a library re-exports from another that re-exports it is recorded as
+  -- where it is defined, and by that name, as Cabal does.
+  re2Bzl <- readIn project ("re2" </> "BUCK.cabal.bzl")
+  assertContains "re2/BUCK.cabal.bzl" "'module': 'Newer.B',\n                    'original': 'Orig.B',\n                    'from': {\n                        'package': 'base-lib'," re2Bzl
+  assertContains "re2/BUCK.cabal.bzl" "'module': 'Orig.A',\n                    'original': 'Orig.A',\n                    'from': {\n                        'package': 'base-lib'," re2Bzl
+
+  -- A library with no modules has one that doesn't need base.
+  emptyBzl <- readIn project ("empty" </> "BUCK.cabal.bzl")
+  assertContains "empty/BUCK.cabal.bzl" "'CabalBuck2Empty'" emptyBzl
+  stub <- readIn project ("empty" </> "cabal-buck2" </> "autogen" </> "empty" </> "empty" </> "CabalBuck2Empty.hs")
+  assertContains "the empty module" "NoImplicitPrelude" stub
 
   -- What depends on the library doesn't need to depend on where they are from.
   userBzl <- readIn project ("user" </> "BUCK.cabal.bzl")
   assertContains "user/BUCK.cabal.bzl" "'package': 're-lib'" userBzl
   assertNotContains "user/BUCK.cabal.bzl" "base-lib" userBzl
+
+-- | The checkout of haskell-buck2 has to be for this release of cabal-buck2:
+-- if it is not, or doesn't say, the error says which branch is needed.
+buck2Version :: Project -> IO ()
+buck2Version project = do
+  let wrong (code', msg) = when (code' == ExitSuccess) $ failure ("accepted: " ++ msg)
+  -- An earlier release didn't have a version.bzl.
+  removeFile (projectDir project </> "buck2" </> "version.bzl")
+  (code, out) <- runBuck2 project []
+  wrong (code, "buck2/ with no version")
+  assertContains "no version" ("needs the " ++ cabalBuck2Version ++ " branch") out
+  assertContains "no version" "buck2/ is for no release" out
+  assertContains "no version" "git -C buck2 checkout " out
+
+  writeBuck2Version (projectDir project) "0.0.0.1"
+  (code', out') <- runBuck2 project []
+  wrong (code', "buck2/ for another release")
+  assertContains "other version" ("This is cabal-buck2 " ++ cabalBuck2Version ++ ", and buck2/ is for cabal-buck2 0.0.0.1.") out'
+
+  writeBuck2Version (projectDir project) cabalBuck2Version
+  _ <- buck2 project []
+  return ()
 
 -- | A package with a @Custom@ build type needs its @Setup.hs@ to be run, which
 -- is not done: it, and what depends on it, can't be built.
