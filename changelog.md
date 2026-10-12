@@ -28,6 +28,12 @@
     * Fix name clash problem with prebuilt sublibraries
     * Fix broken `cabal buck2 -j`
 
+# 0.2.0.1
+
+  * For `cabal-install` version 3.18
+  * Fix an issue with duplicate generated haskell_prebuilt_library()
+    targets due to dependencies of build tools.
+
 # 0.3.0.0
 
   * For `cabal-install` version 3.18
