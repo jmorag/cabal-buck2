@@ -27,3 +27,16 @@
     * Module re-exports are handled correctly
     * Fix name clash problem with prebuilt sublibraries
     * Fix broken `cabal buck2 -j`
+
+# 0.3.0.0
+
+  * For `cabal-install` version 3.18
+  * The generated `BUCK.cabal.bzl` files no longer contain the directory
+    of the package, or of the packages it depends on. Where the
+    packages are is now in `cabal-buck2/packages.bzl` in the root of
+    the project (which has an entry for each package that the project
+    builds), so a package's `BUCK.cabal.bzl` is the same wherever the
+    package is in the project, and whichever project it is part of.
+    All of the packages have to be in the root Buck2 cell.
+  * Needs the `0.3.0.0` branch of haskell-buck2. Re-run `cabal buck2`
+    to regenerate the files.
