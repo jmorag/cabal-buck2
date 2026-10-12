@@ -17,6 +17,7 @@ import System.Directory
   , findExecutable
   , getTemporaryDirectory
   , listDirectory
+  , makeAbsolute
   , removeDirectoryRecursive
   )
 import System.Environment (getEnvironment, lookupEnv)
@@ -31,7 +32,14 @@ import Distribution.Client.Buck2.Version (cabalBuck2Version)
 
 main :: IO ()
 main = do
-  exe <- maybe (fail "cabal-buck2 not found on PATH") return =<< findExecutable "cabal-buck2"
+  -- The executable to test: $CABAL_BUCK2_EXE if it's set (as when this is run by
+  -- buck2, which only puts a build-tool-depends executable on PATH for
+  -- building, not for running tests - see BUCK), otherwise the one on PATH (as
+  -- `cabal test` has it, from build-tool-depends).
+  fromEnv <- lookupEnv "CABAL_BUCK2_EXE"
+  exe <- case fromEnv of
+    Just path -> makeAbsolute path -- the tests run in other directories
+    Nothing -> maybe (fail "cabal-buck2 not found on PATH") return =<< findExecutable "cabal-buck2"
   results <- mapM (runTest exe) tests
   unitResults <- mapM runUnitTest unitTests
   let failures =
