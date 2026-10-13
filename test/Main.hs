@@ -5,7 +5,8 @@ module Main (main) where
 
 import Control.Exception (SomeException, bracket, displayException, try)
 import Control.Monad (forM_, unless, when)
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, nub)
+import Data.Maybe (fromMaybe)
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Map as Map
 import System.Directory
@@ -28,6 +29,7 @@ import System.Process (CreateProcess (..), callProcess, getCurrentPid, proc, rea
 
 import Distribution.Client.Buck2.Cache (cacheBlock, spliceBlock)
 import Distribution.Client.Buck2.Fingerprint (ccFingerprintOf, fingerprintOf)
+import Distribution.Client.Buck2.Prebuilt (RepoPaths (..), externalDirs, toRepoRelative)
 import Distribution.Client.Buck2.Version (cabalBuck2Version)
 
 main :: IO ()
@@ -50,7 +52,7 @@ main = do
     exitFailure
 
 unitTests :: [(String, IO ())]
-unitTests = [("fingerprint", fingerprint), ("cc-fingerprint", ccFingerprint), ("splice-block", spliceBlockTest)]
+unitTests = [("fingerprint", fingerprint), ("cc-fingerprint", ccFingerprint), ("splice-block", spliceBlockTest), ("external-dirs", externalDirsTest)]
 
 runUnitTest :: (String, IO ()) -> IO Bool
 runUnitTest (name, test) = do
@@ -564,3 +566,34 @@ missingModule project = do
   assertContains "broken-pkg/BUCK.cabal.bzl" "'name': 'standalone'" bzl
   assertNotContains "broken-pkg/BUCK.cabal.bzl" "'name': 'uses-lib'" bzl
   assertNotContains "broken-pkg/BUCK.cabal.bzl" "'kind': 'library'" bzl
+
+-- | Libraries outside GHC's libdir and the cabal store (as in a Nix
+-- @ghcWithPackages@) are reached through a symlink for each directory.
+externalDirsTest :: IO ()
+externalDirsTest = do
+  let paths = RepoPaths{rpGhcVersion = "9.6.7", rpGlobalRootAbs = "/ghc/lib", rpStoreRootAbs = "/home/u/.cabal/store/ghc-9.6.7", rpStoreDbRel = "package.db", rpExternal = []}
+      aeson = "/nix/store/aaa-aeson-lib-aeson-2.2.5.1/lib/x86_64-linux-ghc-9.6.7"
+      text = "/nix/store/bbb-text-lib-text-2.1.4/lib/x86_64-linux-ghc-9.6.7"
+      dirs =
+        [ aeson ++ "/aeson-2.2.5.1-X" -- the static libraries, inside the shared libraries' directory
+        , aeson
+        , text ++ "/text-2.1.4-Y"
+        , text
+        , "/ghc/lib/x86_64-linux-ghc-9.6.7/base-4.18.3.0" -- under GHC's libdir
+        , "/home/u/.cabal/store/ghc-9.6.7/foo-1/lib" -- in the cabal store
+        ]
+      linked = externalDirs paths dirs
+      check what expected actual =
+        unless (expected == actual) $
+          failure (what ++ ": expected " ++ show expected ++ ", got " ++ show actual)
+  check "one link for each package, for neither GHC's libdir nor the store" [aeson, text] (map fst linked)
+  check "links are the same on every run" linked (externalDirs paths (reverse dirs ++ dirs))
+  let names = map snd linked
+  check "links are in external/" True (all (\n -> take 9 n == "external/") names)
+  check "the links are different" 2 (length (nub names))
+  let paths' = paths{rpExternal = linked}
+      aesonLink = fromMaybe (error "no link for aeson") (lookup aeson linked)
+  check "a library in a linked directory" (Just (aesonLink ++ "/aeson-2.2.5.1-X/libHSaeson-2.2.5.1-X.a")) (toRepoRelative paths' (aeson ++ "/aeson-2.2.5.1-X/libHSaeson-2.2.5.1-X.a"))
+  check "a library under GHC's libdir" (Just "ghc-9.6.7/x86_64-linux-ghc-9.6.7/base-4.18.3.0/libHSbase.a") (toRepoRelative paths' "/ghc/lib/x86_64-linux-ghc-9.6.7/base-4.18.3.0/libHSbase.a")
+  check "a library in the store" (Just "cabal-store/foo-1/lib/libHSfoo.a") (toRepoRelative paths' "/home/u/.cabal/store/ghc-9.6.7/foo-1/lib/libHSfoo.a")
+  check "something that isn't linked" Nothing (toRepoRelative paths' "/usr/include/stdio.h")
