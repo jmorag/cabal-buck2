@@ -66,10 +66,10 @@ readBuck2Version buck2Dir = do
 -- | Copy @.buckconfig@ and @PACKAGE@ if they don't exist
 ensureBuckconfigAndPackage :: Verbosity -> FilePath -> IO ()
 ensureBuckconfigAndPackage verbosity projectRoot = do
-  copyIfMissing verbosity (exampleDir </> ".buckconfig") (projectRoot </> ".buckconfig")
-  copyIfMissing verbosity (exampleDir </> "PACKAGE") (projectRoot </> "PACKAGE")
+  copyIfMissing verbosity (templateDir </> ".buckconfig") (projectRoot </> ".buckconfig")
+  copyIfMissing verbosity (templateDir </> "PACKAGE") (projectRoot </> "PACKAGE")
   where
-    exampleDir = projectRoot </> "buck2" </> "example"
+    templateDir = projectRoot </> "buck2" </> "template"
 
 copyIfMissing :: Verbosity -> FilePath -> FilePath -> IO ()
 copyIfMissing verbosity src dest = do
