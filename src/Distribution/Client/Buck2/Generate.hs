@@ -52,6 +52,7 @@ import Distribution.PackageDescription
   , buildToolDepends
   , asmOptions
   , asmSources
+  , autogenModules
   , cSources
   , cmmSources
   , jsSources
@@ -176,6 +177,15 @@ instance Monoid ComponentTargets where
 componentTargets :: SpecComponent -> [AutogenFile] -> ComponentTargets
 componentTargets component files = mempty{ctSpec = [component], ctAutogen = files}
 
+-- | What the modules of a package's components are found in.
+data Sources = Sources
+  { sourceFiles :: Set FilePath
+  -- ^ The package's source files, relative to its directory.
+  , providedModules :: Set ModuleName.ModuleName
+  -- ^ The modules that the package's own @Setup.hs@ would have generated,
+  -- which the project provides instead (see 'SrcProvided').
+  }
+
 -- | Generate the buck2 targets for every buildable component of a local
 -- package, along with the warnings for the components that had to be
 -- skipped (and why). This does no IO: the source files it looks for are
@@ -201,12 +211,26 @@ generatePackageTargets
   -- ^ Whether this is a package of the project, as opposed to a dependency
   -- that is built like one. A dependency has components that nothing
   -- needs (its tests, say), which are skipped without a warning.
+  -> Bool
+  -- ^ Whether the package has @build-type: Custom@, and is built as if it
+  -- didn't (@--enable-custom-setup@), so its @Setup.hs@ isn't run: the
+  -- modules that would have generated (its @autogen-modules@, other than
+  -- the ones generated here) are up to the project.
   -> PackageDescription
   -> (PackageTargets, [String])
-generatePackageTargets localIndex projectRoot componentLBIs externalBuildTools projectTestOptions sources skippedLibs inProject pkgDesc =
+generatePackageTargets localIndex projectRoot componentLBIs externalBuildTools projectTestOptions sources skippedLibs inProject customSetup pkgDesc =
   (targets, concatMap ctWarnings results)
   where
-    generate = generateComponent localIndex projectRoot componentLBIs externalBuildTools projectTestOptions sources skippedLibs inProject pkgDesc
+    generate = generateComponent localIndex projectRoot componentLBIs externalBuildTools projectTestOptions (Sources sources provided) skippedLibs inProject pkgDesc
+    provided
+      | customSetup =
+          Set.fromList
+            [ m
+            | comp <- pkgBuildableComponents pkgDesc
+            , m <- autogenModules (componentBuildInfo comp)
+            , m /= autogenPathsModuleName pkgDesc
+            ]
+      | otherwise = Set.empty
     comps = map configured (pkgBuildableComponents pkgDesc)
 
     -- The component as configuring left it: with what a @configure@ script
@@ -253,7 +277,7 @@ generateComponent
   -> Map (PackageName, ComponentName) LocalBuildInfo
   -> Set String
   -> Map (PackageName, ComponentName) [PathTemplate]
-  -> Set FilePath
+  -> Sources
   -> Set (PackageName, LibraryName)
   -> Bool
   -> PackageDescription
@@ -294,7 +318,7 @@ generateComponent localIndex projectRoot componentLBIs externalBuildTools projec
     ifNotOnSkippedLib bi targetName kind act
       | isNothing (lbiClbiFor pkgDesc componentLBIs comp) = notConfigured (kindName kind ++ " " ++ targetName)
       | buildType pkgDesc == Custom =
-          skip (kindName kind ++ " " ++ targetName ++ " (build-type: Custom needs its Setup.hs to be run)")
+          skip (kindName kind ++ " " ++ targetName ++ " (build-type: Custom needs its Setup.hs to be run, unless --enable-custom-setup)")
       | unsupported : _ <- unsupportedSources bi =
           skip (kindName kind ++ " " ++ targetName ++ " (" ++ unsupported ++ " aren't supported)")
       | otherwise =
@@ -345,7 +369,7 @@ generateComponent localIndex projectRoot componentLBIs externalBuildTools projec
     -- test-suite and benchmark: a @main-is@ file over the @other-modules@.
     mainIsComponent kind targetName bi mainIs extra = case lbiClbiFor pkgDesc componentLBIs comp of
       Nothing -> notConfigured (kindName kind ++ " " ++ targetName)
-      Just (lbi, clbi) -> case (resolveMainIs sources bi mainIs, resolveModules sources pkgDesc (Just (lbi, clbi)) bi (otherModules bi)) of
+      Just (lbi, clbi) -> case (resolveMainIs (sourceFiles sources) bi mainIs, resolveModules sources pkgDesc (Just (lbi, clbi)) bi (otherModules bi)) of
         (Right mainSrc, Right (otherSrcs, srcAutogen)) ->
           executableLike kind targetName lbi clbi bi (SrcFile mainSrc) otherSrcs (extra lbi) srcAutogen
         (mainRes, othersRes) ->
@@ -689,13 +713,13 @@ reexportOrigins localIndex pkgDesc lbi clbi lib =
 -- while evaluating the @BUCK@ file, which (since a @buck2 build //...@
 -- evaluates every @BUCK@ file up front) would otherwise take the *entire*
 -- build down over one unresolvable module in one component of one package.
-resolveModules :: Set FilePath -> PackageDescription -> Maybe (LocalBuildInfo, ComponentLocalBuildInfo) -> BuildInfo -> [ModuleName.ModuleName] -> Either [String] ([(String, Src)], [AutogenFile])
+resolveModules :: Sources -> PackageDescription -> Maybe (LocalBuildInfo, ComponentLocalBuildInfo) -> BuildInfo -> [ModuleName.ModuleName] -> Either [String] ([(String, Src)], [AutogenFile])
 resolveModules sources pkgDesc mlbiClbi bi mods =
   case partitionEithers (map (resolveOne sources pkgDesc mlbiClbi bi) mods) of
     ([], triples) -> Right ([(n, v) | (n, v, _) <- triples], concat [fs | (_, _, fs) <- triples])
     (problems, _) -> Left problems
 
-resolveOne :: Set FilePath -> PackageDescription -> Maybe (LocalBuildInfo, ComponentLocalBuildInfo) -> BuildInfo -> ModuleName.ModuleName -> Either String (String, Src, [AutogenFile])
+resolveOne :: Sources -> PackageDescription -> Maybe (LocalBuildInfo, ComponentLocalBuildInfo) -> BuildInfo -> ModuleName.ModuleName -> Either String (String, Src, [AutogenFile])
 resolveOne sources pkgDesc mlbiClbi bi m
   | m == autogenPathsModuleName pkgDesc = case mlbiClbi of
       Nothing ->
@@ -703,14 +727,16 @@ resolveOne sources pkgDesc mlbiClbi bi m
       Just (lbi, clbi) ->
         let file = pathsModuleFile pkgDesc lbi clbi m
          in Right (prettyShow m, SrcAutogen (autogenName file), [file])
-  | otherwise = case firstExisting sources (moduleCandidates bi m) of
+  | otherwise = case firstExisting (sourceFiles sources) (moduleCandidates bi m) of
       Just real -> Right (prettyShow m, SrcFile real, [])
-      Nothing ->
-        Left $
-          "cabal buck2: couldn't find a source file for module "
-            ++ prettyShow m
-            ++ " under "
-            ++ intercalate ", " (sourceDirs bi)
+      Nothing
+        | m `Set.member` providedModules sources -> Right (prettyShow m, SrcProvided, [])
+        | otherwise ->
+            Left $
+              "cabal buck2: couldn't find a source file for module "
+                ++ prettyShow m
+                ++ " under "
+                ++ intercalate ", " (sourceDirs bi)
 
 -- | Cabal's own Setup.hs generates a @Paths_\<pkg\>@ module fresh at
 -- configure\/build time (giving @version@\/@getDataFileName@\/etc) - no

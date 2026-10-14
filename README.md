@@ -169,6 +169,21 @@ arguments that you can use to override or transform the generated
 targets - take a look at the comments in the generated code to see
 how.
 
+The overrides can also go in a `cabal-buck2.bzl` file in the root of
+the project, for all of its packages at once, which is useful when a
+package's directory isn't yours to add files to (a git submodule, say):
+
+```
+OVERRIDES = {
+    # package name -> component name -> extra attributes
+    "my-package": {
+        "my-package": {"compiler_flags": ["-O2"]},
+    },
+}
+```
+
+Re-run `cabal buck2` after adding or removing `cabal-buck2.bzl`.
+
 You can also completely override the generated targets and write a
 `BUCK` file with your own rules, while still making use of the
 pre-built dependencies that `cabal buck2` produces.  For example, the
@@ -387,6 +402,22 @@ Build-type `Custom` isn't supported, and can't be in general, so
 also applies to dependencies when `--source-deps` is being used.  As
 with other unsupported features, you can use `--keep-going` to just
 skip all the affected packages.
+
+If a package's `Setup.hs` isn't needed by your build, or what it
+does can be done some other way, `--enable-custom-setup` builds it as
+if it had `build-type: Simple` (or `Configure`, if it has a
+`configure` script). The modules that its `Setup.hs` would generate
+(its `autogen-modules`) must then be given by the project, in the
+overrides of the component (see [Customising the build](#customising-the-build)),
+for example
+
+```
+OVERRIDES = {
+    "my-package": {
+        "my-package": {"srcs": {"My.Generated.Module": "//gen:my-module"}},
+    },
+}
+```
 
 ## Hooks build type
 

@@ -1,6 +1,14 @@
 # 0.4.0.0
 
   * For `cabal-install` version 3.18
+  * `--enable-custom-setup` builds the packages with `build-type:
+    Custom` as if they had `build-type: Configure` (if they have a
+    `configure` script) or `Simple`, instead of skipping them. Their
+    `Setup.hs` isn't run, so the modules it would generate (its
+    `autogen-modules`) must be provided by the project.
+  * A project can override the generated targets of its packages in a
+    `cabal-buck2.bzl` at its root, rather than in each package's
+    `BUCK` file.
 
 # 0.3.0.0
 

@@ -36,6 +36,8 @@ module Distribution.Client.CmdBuck2
 import Distribution.Client.Compat.Prelude
 import Prelude ()
 
+import qualified Data.Set as Set
+
 import Distribution.Client.DistDirLayout (DistDirLayout (distProjectRootDirectory))
 import Distribution.Client.NixStyleOptions
   ( NixStyleFlags (..)
@@ -70,9 +72,10 @@ import Distribution.Verbosity (normal)
 import Distribution.Client.Buck2.BuildDependencies (buildDependencies)
 import Distribution.Client.Buck2.Cache (cacheSetting, configureCache)
 import Distribution.Client.Buck2.Configure (configureComponents)
-import Distribution.Client.Buck2.Flags (Buck2Flags, buck2FlagOptions, defaultBuck2Flags, dependencyMode)
+import Distribution.Client.Buck2.Flags (Buck2Flags (buck2CustomSetup), buck2FlagOptions, defaultBuck2Flags, dependencyMode)
 import Distribution.Client.Buck2.LocalPackages
   ( builtLocalPackages
+  , translateCustomSetups
   , localBuildTools
   , prebuiltUnits
   , localToolTargets
@@ -144,12 +147,17 @@ buck2Action flags extraArgs globalFlags = do
       let projectRoot = distProjectRootDirectory (distDirLayout baseCtx)
       checkBuck2Prelude verbosity projectRoot
 
-      buildCtx <- buildDependencies verbosity mode baseCtx targetSelectors
+      builtCtx <- buildDependencies verbosity mode baseCtx targetSelectors
+      (plan, customSetups) <-
+        if fromFlagOrDefault False (buck2CustomSetup (extraFlags flags))
+          then translateCustomSetups verbosity mode (distDirLayout baseCtx) (elaboratedPlanOriginal builtCtx)
+          else return (elaboratedPlanOriginal builtCtx, Set.empty)
+      let buildCtx = builtCtx{elaboratedPlanOriginal = plan}
 
       ensureBuckconfigAndPackage verbosity projectRoot
       configureCache verbosity projectRoot cache
 
-      localPkgs <- builtLocalPackages verbosity mode (distDirLayout baseCtx) (elaboratedPlanOriginal buildCtx)
+      localPkgs <- builtLocalPackages verbosity mode (distDirLayout baseCtx) customSetups (elaboratedPlanOriginal buildCtx)
 
       (externalBuildTools, resolvedDeps) <-
         generatePrebuilt

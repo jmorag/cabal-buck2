@@ -20,10 +20,11 @@ data Buck2Flags = Buck2Flags
   { buck2CacheAddress :: Flag String
   , buck2NoCache :: Flag Bool
   , buck2SourceDeps :: Flag Bool
+  , buck2CustomSetup :: Flag Bool
   }
 
 defaultBuck2Flags :: Buck2Flags
-defaultBuck2Flags = Buck2Flags{buck2CacheAddress = mempty, buck2NoCache = mempty, buck2SourceDeps = mempty}
+defaultBuck2Flags = Buck2Flags{buck2CacheAddress = mempty, buck2NoCache = mempty, buck2SourceDeps = mempty, buck2CustomSetup = mempty}
 
 buck2FlagOptions :: ShowOrParseArgs -> [OptionField Buck2Flags]
 buck2FlagOptions _ =
@@ -47,6 +48,13 @@ buck2FlagOptions _ =
       "Build the dependencies with buck2, from their sources (unpacked under dist-newstyle), like the packages of the project, instead of having cabal build them into its store. Nothing is then taken from the store."
       buck2SourceDeps
       (\v f -> f{buck2SourceDeps = v})
+      trueArg
+  , option
+      []
+      ["enable-custom-setup"]
+      "Build the packages with build-type: Custom as if they had build-type: Configure (if they have a configure script) or Simple, rather than skipping them. Their Setup.hs isn't run: the modules it would generate must be provided (see buck2/cabal.bzl)."
+      buck2CustomSetup
+      (\v f -> f{buck2CustomSetup = v})
       trueArg
   ]
 

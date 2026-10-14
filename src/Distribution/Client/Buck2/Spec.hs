@@ -87,8 +87,10 @@ data SpecComponent = SpecComponent
 -- | A source file of a component: either a real file in the package
 -- (relative to its directory), or one generated into the package's
 -- @cabal-buck2\/autogen@ directory, named by its @export_file()@ entry there
--- (see 'Distribution.Client.Buck2.Generate.AutogenFile').
-data Src = SrcFile FilePath | SrcAutogen String
+-- (see 'Distribution.Client.Buck2.Generate.AutogenFile'), or a module that
+-- the package's @Setup.hs@ would have generated, which the project must
+-- provide (@--enable-custom-setup@).
+data Src = SrcFile FilePath | SrcAutogen String | SrcProvided
 
 -- | A library a component depends on.
 data SpecDep = SpecDep

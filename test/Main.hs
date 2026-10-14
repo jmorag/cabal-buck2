@@ -73,6 +73,7 @@ tests =
   , ("custom-setup", customSetup)
   , ("reexports", reexports)
   , ("buck2-version", buck2Version)
+  , ("project-overrides", projectOverrides)
   ]
 
 -- | A copy of a fixture project, and how to run @cabal-buck2@ in it.
@@ -100,6 +101,7 @@ runTest exe (name, test) = do
       "disabled-stanzas" -> "basic"
       "cache-config" -> "basic"
       "buck2-version" -> "basic"
+      "project-overrides" -> "basic"
       _ -> name
     setup dir = do
       cleanup dir
@@ -485,6 +487,33 @@ customSetup project = do
   assertContains "warning" "skipping executable app" out
   depBzl <- readIn project ("dist-newstyle" </> "src" </> "custom-dep-0.1" </> "BUCK.cabal.bzl")
   assertNotContains "custom-dep BUCK.cabal.bzl" "'kind': 'library'" depBzl
+
+  -- With --enable-custom-setup it is built as if it had build-type: Simple,
+  -- and the module its Setup.hs would generate is left to the project.
+  translated <- buck2 project ["--source-deps", "--enable-custom-setup"]
+  assertContains "warning" "custom-dep-0.1 as if it had build-type: Simple" translated
+  assertNotContains "output" "skipping" translated
+  translatedBzl <- readIn project ("dist-newstyle" </> "src" </> "custom-dep-0.1" </> "BUCK.cabal.bzl")
+  assertContains "custom-dep BUCK.cabal.bzl" "'kind': 'library'" translatedBzl
+  assertContains "custom-dep BUCK.cabal.bzl" "'Custom.Generated': {\n                    'provided': True," translatedBzl
+  appBzl <- readIn project ("app" </> "BUCK.cabal.bzl")
+  assertContains "app BUCK.cabal.bzl" "'kind': 'executable'" appBzl
+
+-- | A project's @cabal-buck2.bzl@, with its overrides of the generated
+-- targets, is loaded by @packages.bzl@, and an empty set of overrides is
+-- given there if there is none.
+projectOverrides :: Project -> IO ()
+projectOverrides project = do
+  _ <- buck2 project []
+  without <- readIn project ("cabal-buck2" </> "packages.bzl")
+  assertContains "packages.bzl" "OVERRIDES = {}" without
+  assertNotContains "packages.bzl" "cabal-buck2.bzl\"" without
+
+  writeFile (projectDir project </> "cabal-buck2.bzl") "OVERRIDES = {}\n"
+  _ <- buck2 project []
+  with <- readIn project ("cabal-buck2" </> "packages.bzl")
+  assertContains "packages.bzl" "load(\"//:cabal-buck2.bzl\", _OVERRIDES = \"OVERRIDES\")" with
+  assertContains "packages.bzl" "OVERRIDES = _OVERRIDES" with
 
 -- | @--cache=ADDRESS@ adds the cache's settings to @.buckconfig@, which are
 -- kept by later runs without the flag, and @--no-cache@ removes.

@@ -12,6 +12,7 @@ module Distribution.Client.Buck2.LocalPackages
   , componentNamesFor
   , BuiltPackage (..)
   , builtLocalPackages
+  , translateCustomSetups
   , rootRelativeDir
   , nonLibraryTargetName
   , ToolTarget (..)
@@ -31,6 +32,7 @@ import System.FilePath (makeRelative, (</>))
 
 import Distribution.Client.DistDirLayout (DistDirLayout (distUnpackedSrcDirectory, distUnpackedSrcRootDirectory))
 import qualified Distribution.Client.InstallPlan as InstallPlan
+import qualified Distribution.Compat.Graph as Graph
 import Distribution.Client.ProjectPlanning
   ( ElaboratedConfiguredPackage (..)
   , ElaboratedInstallPlan
@@ -47,11 +49,11 @@ import Distribution.Client.Types (confInstId)
 import Distribution.Client.Types.PackageLocation (PackageLocation (..))
 import Distribution.Types.UnitId (UnitId, newSimpleUnitId)
 
-import Distribution.Package (HasUnitId (installedUnitId), PackageInstalled (installedDepends), PackageName, packageId, packageName, unPackageName)
+import Distribution.Package (HasUnitId (installedUnitId), PackageId, PackageInstalled (installedDepends), PackageName, packageId, packageName, unPackageName)
 import Distribution.PackageDescription (PackageDescription)
 import qualified Distribution.PackageDescription as PD
 import Distribution.Simple.InstallDirs (PathTemplate)
-import Distribution.Simple.Utils (die', info, ordNub)
+import Distribution.Simple.Utils (die', info, ordNub, warn)
 import Distribution.Types.Component (componentBuildInfo, componentName)
 import Distribution.Types.ComponentName (ComponentName (CTestName))
 import Distribution.Types.Dependency (depPkgName)
@@ -204,19 +206,59 @@ data BuiltPackage = BuiltPackage
   , bpInProject :: Bool
   -- ^ A package of the project, as opposed to a dependency that is built
   -- like one.
+  , bpCustomSetup :: Bool
+  -- ^ A package with @build-type: Custom@ that is built as if it didn't
+  -- (see 'translateCustomSetups'): 'bpDescription' has the build type it is
+  -- built as.
   }
+
+-- | For @--enable-custom-setup@: the plan, with each package that buck2
+-- builds and that has @build-type: Custom@ built as if it had @build-type:
+-- Configure@ if it has a @configure@ script, or @Simple@ if not (as Hadrian
+-- does), and the packages that are. Their @Setup.hs@ isn't run, so whatever
+-- it does is up to the project.
+translateCustomSetups :: Verbosity -> DependencyMode -> DistDirLayout -> ElaboratedInstallPlan -> IO (ElaboratedInstallPlan, Set PackageId)
+translateCustomSetups verbosity mode distDirLayout plan = do
+  pkgs <- traverse translate (InstallPlan.toList plan)
+  let translated = Map.fromList (mapMaybe snd pkgs)
+  for_ (Map.toList translated) $ \(pkgId, buildType) ->
+    warn verbosity $
+      "cabal buck2: building "
+        ++ prettyShow pkgId
+        ++ " as if it had build-type: "
+        ++ prettyShow buildType
+        ++ " (--enable-custom-setup), so its Setup.hs isn't run"
+  return (InstallPlan.new (InstallPlan.planIndepGoals plan) (Graph.fromDistinctList (map fst pkgs)), Map.keysSet translated)
+  where
+    translate pkg = case pkg of
+      InstallPlan.Configured elab
+        | isBuiltLocally mode elab
+        , PD.buildType desc == PD.Custom -> do
+            dir <- packageSourceDir verbosity distDirLayout elab
+            hasConfigure <- doesFileExist (dir </> "configure")
+            let buildType = if hasConfigure then PD.Configure else PD.Simple
+            return (InstallPlan.Configured elab{elabPkgDescription = desc{PD.buildTypeRaw = Just buildType}}, Just (packageId elab, buildType))
+        where
+          desc = elabPkgDescription elab
+      _ -> return (pkg, Nothing)
 
 -- | Every package buck2 builds from source. Per-component elaboration gives
 -- each such package one 'ElaboratedConfiguredPackage' per component, all
 -- sharing the same directory and 'PackageDescription', so there is one
 -- entry per directory here.
-builtLocalPackages :: Verbosity -> DependencyMode -> DistDirLayout -> ElaboratedInstallPlan -> IO [BuiltPackage]
-builtLocalPackages verbosity mode distDirLayout plan = do
+builtLocalPackages :: Verbosity -> DependencyMode -> DistDirLayout -> Set PackageId -> ElaboratedInstallPlan -> IO [BuiltPackage]
+builtLocalPackages verbosity mode distDirLayout customSetups plan = do
   pkgs <-
     fmap (nubBy ((==) `on` bpDir)) . sequenceA $
       [ do
         dir <- packageSourceDir verbosity distDirLayout elab
-        return BuiltPackage{bpDir = dir, bpDescription = elabPkgDescription elab, bpInProject = elabLocalToProject elab}
+        return
+          BuiltPackage
+            { bpDir = dir
+            , bpDescription = elabPkgDescription elab
+            , bpInProject = elabLocalToProject elab
+            , bpCustomSetup = packageId elab `Set.member` customSetups
+            }
       | elab <- builtLocalElabs mode plan
       ]
   -- Everything that refers to a package does so by its name (a dependency in
