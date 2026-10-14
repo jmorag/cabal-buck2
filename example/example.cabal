@@ -20,6 +20,7 @@ library
   build-depends:
       base >=4 && <5
     , example:th
+    , bytestring
     , safe
     , template-haskell
   default-extensions: TemplateHaskell, ForeignFunctionInterface
