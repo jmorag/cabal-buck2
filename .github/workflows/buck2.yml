@@ -25,8 +25,20 @@ env:
 
 jobs:
   buck2:
-    name: cabal buck2
+    name: cabal buck2${{ matrix.args }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The dependencies are built by cabal, into its store.
+          - mode: store
+            args: ""
+          # The dependencies are built from source by buck2 as well, so that
+          # the cabal store isn't used for them at all. This builds a lot
+          # more with buck2 (cabal-install and everything it depends on).
+          - mode: source-deps
+            args: " --source-deps"
     defaults:
       run:
         shell: bash
@@ -74,8 +86,8 @@ jobs:
         id: cache
         with:
           path: ~/.local/state/cabal
-          key: ${{ steps.get-osver.outputs.osver }}-store-buck2-${{ hashFiles('dist-newstyle/cache/plan.json') }}
-          restore-keys: ${{ steps.get-osver.outputs.osver }}-store-buck2-
+          key: ${{ steps.get-osver.outputs.osver }}-store-buck2-${{ matrix.mode }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+          restore-keys: ${{ steps.get-osver.outputs.osver }}-store-buck2-${{ matrix.mode }}-
 
       - name: Build cabal-buck2
         run: cabal build exe:cabal-buck2
@@ -88,10 +100,10 @@ jobs:
       # This creates .buckconfig and PACKAGE (copied from buck2/example), as
       # well as third-party/haskell and BUCK.cabal.bzl. BUCK is the one file
       # of the setup that is committed: it is hand-maintained, see there.
-      - name: Generate buck2 build (cabal-buck2 --enable-tests)
+      - name: Generate buck2 build (cabal-buck2 --enable-tests${{ matrix.args }})
         run: |
           cp "$(cabal list-bin exe:cabal-buck2)" "$RUNNER_TEMP/cabal-buck2"
-          "$RUNNER_TEMP/cabal-buck2" --enable-tests
+          "$RUNNER_TEMP/cabal-buck2" --enable-tests${{ matrix.args }}
 
       - name: Cache dependencies
         uses: actions/cache/save@v6
