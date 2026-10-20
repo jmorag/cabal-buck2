@@ -73,8 +73,27 @@ tests =
   , ("custom-setup", customSetup)
   , ("reexports", reexports)
   , ("buck2-version", buck2Version)
-  , ("project-overrides", projectOverrides)
+  , ("project-overrides", projectOverrides)  , ("same-name", sameName)
   ]
+
+-- | A library and an executable with the same name in one package, and
+-- another package that needs that executable as a build tool.
+sameName :: Project -> IO ()
+sameName project = do
+  _ <- buck2 project []
+
+  -- The executable can't have the library's target name, so it gets a
+  -- suffix - and a build-tool-depends on it from another package has to
+  -- name it the same way, or buck2 won't find the target.
+  toolBzl <- readIn project ("tool" </> "BUCK.cabal.bzl")
+  let tool = assertContains "tool/BUCK.cabal.bzl"
+  tool "'kind': 'library'" toolBzl
+  tool "'name': 'tool'" toolBzl
+  tool "'kind': 'executable'" toolBzl
+  tool "'name': 'tool-exe'" toolBzl
+  userBzl <- readIn project ("user" </> "BUCK.cabal.bzl")
+  assertContains "user/BUCK.cabal.bzl" "'exe': 'tool-exe'" userBzl
+  assertContains "user/BUCK.cabal.bzl" "'package': 'tool'" userBzl
 
 -- | A copy of a fixture project, and how to run @cabal-buck2@ in it.
 data Project = Project
