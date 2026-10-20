@@ -65,6 +65,7 @@ import Distribution.PackageDescription
   , extraSrcFiles
   , usedExtensions
   , defaultLanguage
+  , extraLibDirs
   , extraLibs
   , hcOptions
   , hsSourceDirs
@@ -513,6 +514,7 @@ specComponent localIndex externalBuildTools kind name bi =
       scLanguage = Just (prettyShow (fromMaybe Haskell98 (defaultLanguage bi)))
     , scExtensions = map prettyShow (usedExtensions bi)
     , scExtraLibraries = extraLibs bi
+    , scExtraLibDirs = map getSymbolicPath (extraLibDirs bi)
     , scDeps = map specDep (libraryDeps bi)
     , scReexports = []
     , scBuildTools = mapMaybe buildToolSpec (ordNub [(pn, exe) | ExeDependency pn exe _ <- buildToolDepends bi])

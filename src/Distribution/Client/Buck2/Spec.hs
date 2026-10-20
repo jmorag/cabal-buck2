@@ -67,6 +67,10 @@ data SpecComponent = SpecComponent
   , scLanguage :: Maybe String
   , scExtensions :: [String]
   , scExtraLibraries :: [String]
+  , scExtraLibDirs :: [FilePath]
+  -- ^ Where to look for the 'scExtraLibraries': the component's
+  -- @extra-lib-dirs@, as configured, so including the directories of its
+  -- @pkgconfig-depends@ (Cabal adds those at configure time).
   , scDeps :: [SpecDep]
   , scReexports :: [SpecReexport]
   -- ^ Modules a library re-exports from the library of another package (or

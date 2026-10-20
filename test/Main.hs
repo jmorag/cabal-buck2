@@ -295,6 +295,9 @@ basic project = do
   -- extra-source-files reach the spec as they are (patterns), for
   -- cabal.bzl to glob.
   lib "'extra_source_files': [\n        'include/*.h',\n    ]" libBzl
+  -- extra-lib-dirs, as configured (so with the directories of any
+  -- pkgconfig-depends), go in the spec for the link.
+  lib "'extra_lib_dirs': [\n                'libs',\n            ]" libBzl
   -- A module's boot file is found next to its source.
   lib "'boot_srcs': {\n                'MyLib': 'src/MyLib.hs-boot',\n            }" libBzl
   noLib "haskell_library(" libBzl
