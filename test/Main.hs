@@ -29,8 +29,9 @@ import System.Process (CreateProcess (..), callProcess, getCurrentPid, proc, rea
 
 import Distribution.Client.Buck2.Cache (cacheBlock, spliceBlock)
 import Distribution.Client.Buck2.Fingerprint (ccFingerprintOf, fingerprintOf)
-import Distribution.Client.Buck2.Prebuilt (RepoPaths (..), externalDirs, toRepoRelative)
+import Distribution.Client.Buck2.Prebuilt (RepoPaths (..), externalDirs, prebuiltLinkerFlags, toRepoRelative)
 import Distribution.Client.Buck2.Version (cabalBuck2Version)
+import Distribution.InstalledPackageInfo (InstalledPackageInfo (..), emptyInstalledPackageInfo)
 
 main :: IO ()
 main = do
@@ -52,7 +53,7 @@ main = do
     exitFailure
 
 unitTests :: [(String, IO ())]
-unitTests = [("fingerprint", fingerprint), ("cc-fingerprint", ccFingerprint), ("splice-block", spliceBlockTest), ("external-dirs", externalDirsTest)]
+unitTests = [("fingerprint", fingerprint), ("cc-fingerprint", ccFingerprint), ("splice-block", spliceBlockTest), ("external-dirs", externalDirsTest), ("linker-flags", linkerFlagsTest)]
 
 runUnitTest :: (String, IO ()) -> IO Bool
 runUnitTest (name, test) = do
@@ -631,3 +632,23 @@ externalDirsTest = do
   check "a library under GHC's libdir" (Just "ghc-9.6.7/x86_64-linux-ghc-9.6.7/base-4.18.3.0/libHSbase.a") (toRepoRelative paths' "/ghc/lib/x86_64-linux-ghc-9.6.7/base-4.18.3.0/libHSbase.a")
   check "a library in the store" (Just "cabal-store/foo-1/lib/libHSfoo.a") (toRepoRelative paths' "/home/u/.cabal/store/ghc-9.6.7/foo-1/lib/libHSfoo.a")
   check "something that isn't linked" Nothing (toRepoRelative paths' "/usr/include/stdio.h")
+
+-- | The @-L@ flags for a prebuilt package's @extra-libraries@ come from its
+-- @library-dirs@, as they do when GHC links against the package itself; a
+-- package without any needs no @-L@ flags at all.
+linkerFlagsTest :: IO ()
+linkerFlagsTest = do
+  let withLibs =
+        emptyInstalledPackageInfo
+          { libraryDirs = ["/nix/store/aaa-hmatrix-0.20.2/lib/x86_64-linux-ghc-9.6.7/hmatrix-0.20.2-X", "/nix/store/bbb-openblas-0.3.33/lib", "/nix/store/bbb-openblas-0.3.33/lib"]
+          , extraLibraries = ["openblas"]
+          }
+      withoutLibs = emptyInstalledPackageInfo{libraryDirs = ["/nix/store/ccc-text-2.1.4/lib"]}
+      check what expected actual =
+        unless (expected == actual) $
+          failure (what ++ ": expected " ++ show expected ++ ", got " ++ show actual)
+  check
+    "a package with extra-libraries"
+    ["-L/nix/store/aaa-hmatrix-0.20.2/lib/x86_64-linux-ghc-9.6.7/hmatrix-0.20.2-X", "-L/nix/store/bbb-openblas-0.3.33/lib", "-lopenblas"]
+    (prebuiltLinkerFlags withLibs)
+  check "a package without" [] (prebuiltLinkerFlags withoutLibs)

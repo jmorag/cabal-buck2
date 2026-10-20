@@ -23,6 +23,7 @@ module Distribution.Client.Buck2.Prebuilt
   ( generatePrebuilt
   , RepoPaths (..)
   , externalDirs
+  , prebuiltLinkerFlags
   , toRepoRelative
   ) where
 
@@ -506,8 +507,22 @@ prebuiltCall paths uidToTarget p =
     profiled = rel (rpProfiledLibs p)
     globalDbRel = ("ghc-" ++ rpGhcVersion paths) </> "package.conf.d"
     headerDirs = mapMaybe (toRepoRelative paths) (includeDirs info)
-    extraLinkerFlags = ["-l" ++ lib | lib <- extraLibraries info]
+    extraLinkerFlags = prebuiltLinkerFlags info
     depTargets = ordNub [":" ++ t | d <- depends info, Just t <- [Map.lookup d uidToTarget]]
+
+-- | The linker flags a package's @.conf@ file asks for: its @extra-libraries@,
+-- and where to find them. The @library-dirs@ of a package that needs a
+-- system library are also where that library is, when it isn't on the
+-- linker's default path: Cabal records the directory it was found in at
+-- configure time (@extra-lib-dirs@, or a Nix store path), and GHC passes
+-- them all as @-L@ when it links against the package. Without them the
+-- @-l@ flag alone can't be satisfied.
+prebuiltLinkerFlags :: InstalledPackageInfo -> [String]
+prebuiltLinkerFlags info =
+  ["-L" ++ dir | not (null libs), dir <- ordNub (libraryDirs info)]
+    ++ ["-l" ++ lib | lib <- libs]
+  where
+    libs = extraLibraries info
 
 -- | Convert an absolute path under GHC's libdir, the cabal store or one of the
 -- 'externalDirs' into one relative to @third-party\/haskell@, via whichever
