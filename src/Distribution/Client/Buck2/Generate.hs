@@ -493,9 +493,11 @@ packageSpec pkgDesc projectGhcOptions components =
     { specPackageName = unPackageName (packageName pkgDesc)
     , specPackageVersion = prettyShow (packageVersion pkgDesc)
     , specGhcOptions = projectGhcOptions
-    , specDataDir = getSymbolicPath (dataDir pkgDesc)
-    , specDataFiles = map getSymbolicPath (dataFiles pkgDesc)
-    , specExtraSourceFiles = map getSymbolicPath (extraSrcFiles pkgDesc)
+    , -- These are patterns buck2 globs for, as the .cabal file wrote them:
+      -- `./foo.jpg` is a fine Cabal pattern but not a valid buck2 path.
+      specDataDir = normalise (getSymbolicPath (dataDir pkgDesc))
+    , specDataFiles = map (normalise . getSymbolicPath) (dataFiles pkgDesc)
+    , specExtraSourceFiles = map (normalise . getSymbolicPath) (extraSrcFiles pkgDesc)
     , specComponents = components
     }
 

@@ -28,7 +28,7 @@ import Prelude ()
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory, removeDirectoryRecursive)
-import System.FilePath (makeRelative, (</>))
+import System.FilePath (makeRelative, normalise, (</>))
 
 import Distribution.Client.DistDirLayout (DistDirLayout (distUnpackedSrcDirectory, distUnpackedSrcRootDirectory))
 import qualified Distribution.Client.InstallPlan as InstallPlan
@@ -300,9 +300,11 @@ nonLibraryTargetName suffix desc component
   where
     name = unUnqualComponentName component
 
--- | A directory relative to the project root, @.@ for the root itself.
+-- | A directory relative to the project root, @.@ for the root itself. The
+-- directory is as @cabal.project@ names it, so it may be relative already,
+-- with a @.\/@ in front (@packages: .\/foo@) that a buck2 label can't have.
 rootRelativeDir :: FilePath -> FilePath -> FilePath
-rootRelativeDir projectRoot dir = case makeRelative projectRoot dir of
+rootRelativeDir projectRoot dir = case makeRelative projectRoot (normalise dir) of
   "" -> "."
   rel -> rel
 
