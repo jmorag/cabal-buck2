@@ -232,6 +232,7 @@ componentValue c =
       ++ listField "extensions" (scExtensions c)
       ++ listField "extra_libraries" (scExtraLibraries c)
       ++ listField "extra_lib_dirs" (scExtraLibDirs c)
+      ++ listField "ld_options" (scLdOptions c)
       ++ valuesField "deps" (map depValue (scDeps c))
       ++ valuesField "reexports" (map reexportValue (scReexports c))
       ++ valuesField "build_tools" (map buildToolValue (scBuildTools c))
