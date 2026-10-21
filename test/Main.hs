@@ -78,6 +78,7 @@ tests =
   , ("pkgconfig", pkgconfig)
   , ("project-overrides", projectOverrides)
   , ("same-name", sameName)
+  , ("normalise-paths", normalisePaths)
   ]
 
 -- | A library and an executable with the same name in one package, and
@@ -98,6 +99,23 @@ sameName project = do
   userBzl <- readIn project ("user" </> "BUCK.cabal.bzl")
   assertContains "user/BUCK.cabal.bzl" "'exe': 'tool-exe'" userBzl
   assertContains "user/BUCK.cabal.bzl" "'package': 'tool'" userBzl
+
+-- | Paths written with a @.\/@ prefix, in cabal.project and in the file
+-- patterns of a package: buck2 accepts neither in a label nor in a glob.
+normalisePaths :: Project -> IO ()
+normalisePaths project = do
+  _ <- buck2 project []
+
+  -- `./pkg/pkg.cabal` in cabal.project is the package in `pkg`.
+  packages <- readIn project ("cabal-buck2" </> "packages.bzl")
+  assertContains "cabal-buck2/packages.bzl" "'pkg': 'pkg'" packages
+  assertNotContains "cabal-buck2/packages.bzl" "./" packages
+
+  -- The patterns buck2 globs for come out without the prefix too.
+  pkgBzl <- readIn project ("pkg" </> "BUCK.cabal.bzl")
+  assertContains "pkg/BUCK.cabal.bzl" "'data/x.txt'" pkgBzl
+  assertContains "pkg/BUCK.cabal.bzl" "'README'" pkgBzl
+  assertNotContains "pkg/BUCK.cabal.bzl" "'./" pkgBzl
 
 -- | A copy of a fixture project, and how to run @cabal-buck2@ in it.
 data Project = Project
