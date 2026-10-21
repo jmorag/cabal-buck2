@@ -71,6 +71,7 @@ import Distribution.PackageDescription
   , hcOptions
   , hsSourceDirs
   , includeDirs
+  , libExposed
   , otherModules
   , buildType
   , lookupComponent
@@ -353,6 +354,7 @@ generateComponent localIndex projectRoot componentLBIs externalBuildTools projec
                 (specComponent localIndex externalBuildTools Library targetName bi)
                   { scSrcs = srcs ++ [(prettyShow m, SrcAutogen (autogenName f)) | (m, f) <- extra]
                   , scReexports = reexports
+                  , scExposed = libExposed lib
                   , scGeneratedIncludeDirs = generatedIncludeDirs projectRoot pkgDesc lbi bi
                   , scHscOptions = platformDefines lbi
                   }
@@ -528,6 +530,7 @@ specComponent localIndex externalBuildTools kind name bi =
     , scCcOptions = ccOptions bi
     , scCxxOptions = cxxOptions bi
     , scIncludeDirs = map getSymbolicPath (includeDirs bi)
+    , scExposed = True
     , scHscOptions = []
     , scGeneratedIncludeDirs = []
     , scPkgconfig = ordNub [unPkgconfigName n | PkgconfigDependency n _ <- pkgconfigDepends bi]

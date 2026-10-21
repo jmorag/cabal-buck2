@@ -244,6 +244,7 @@ componentValue c =
       ++ listField "asm_sources" (scAsmSources c)
       ++ listField "asm_options" (scAsmOptions c)
       ++ listField "include_dirs" (scIncludeDirs c)
+      ++ [("exposed", VBool False) | not (scExposed c)]
       ++ listField "hsc_options" (scHscOptions c)
       ++ listField "generated_include_dirs" (scGeneratedIncludeDirs c)
       ++ listField "pkgconfig" (scPkgconfig c)

@@ -87,6 +87,8 @@ data SpecComponent = SpecComponent
   , scAsmSources :: [FilePath]
   , scAsmOptions :: [String]
   , scIncludeDirs :: [FilePath]
+  , scExposed :: Bool
+  -- ^ Of a library: whether its package is exposed (Cabal's @exposed@).
   , scHscOptions :: [String]
   -- ^ Defines for the C compiler of @hsc2hs@, which say what the code is
   -- compiled for (GHC does this itself for Haskell code).
