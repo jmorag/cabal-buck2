@@ -83,11 +83,17 @@ jobs:
         id: get-osver
         run: echo "osver=$ImageOS" >> "$GITHUB_OUTPUT"
 
+      # Where cabal keeps its store depends on whether ~/.cabal exists (the
+      # setup action makes it), so ask it.
+      - name: Get the cabal store directory
+        id: store
+        run: echo "dir=$(cabal path --store-dir)" >> "$GITHUB_OUTPUT"
+
       - name: Restore cached dependencies
         uses: actions/cache/restore@v6
         id: cache
         with:
-          path: ~/.local/state/cabal
+          path: ${{ steps.store.outputs.dir }}
           key: ${{ steps.get-osver.outputs.osver }}-store-buck2-${{ matrix.mode }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
           restore-keys: ${{ steps.get-osver.outputs.osver }}-store-buck2-${{ matrix.mode }}-
 
@@ -111,7 +117,7 @@ jobs:
         uses: actions/cache/save@v6
         if: always() && steps.cache.outputs.cache-hit != 'true'
         with:
-          path: ~/.local/state/cabal
+          path: ${{ steps.store.outputs.dir }}
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
       - name: buck2 build
@@ -165,11 +171,17 @@ jobs:
         id: get-osver
         run: echo "osver=$ImageOS" >> "$GITHUB_OUTPUT"
 
+      # Where cabal keeps its store depends on whether ~/.cabal exists (the
+      # setup action makes it), so ask it.
+      - name: Get the cabal store directory
+        id: store
+        run: echo "dir=$(cabal path --store-dir)" >> "$GITHUB_OUTPUT"
+
       - name: Restore cached dependencies
         uses: actions/cache/restore@v6
         id: cache
         with:
-          path: ~/.local/state/cabal
+          path: ${{ steps.store.outputs.dir }}
           key: ${{ steps.get-osver.outputs.osver }}-store-example-${{ hashFiles('dist-newstyle/cache/plan.json', 'example/example.cabal') }}
           restore-keys: ${{ steps.get-osver.outputs.osver }}-store-example-
 
@@ -192,7 +204,7 @@ jobs:
         uses: actions/cache/save@v6
         if: always() && steps.cache.outputs.cache-hit != 'true'
         with:
-          path: ~/.local/state/cabal
+          path: ${{ steps.store.outputs.dir }}
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
       - name: buck2 build and test (dev)
