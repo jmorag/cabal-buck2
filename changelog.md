@@ -15,6 +15,9 @@
   * The `.hs-boot` file of a module is an input of the module's
     compilation, and is found next to its source when that is
     generated (by `happy`, say).
+  * Pass `extra-lib-dirs` and `ld-options` through to Buck2. This
+    fixes some cases of `pkgconfig-depends` not working correctly
+    with Buck2, amongst other things.
 
 # 0.3.0.0
 

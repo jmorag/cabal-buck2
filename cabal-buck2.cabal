@@ -38,6 +38,7 @@ extra-source-files:
   test/fixtures/**/*.h
   test/fixtures/**/*.hs
   test/fixtures/**/*.hs-boot
+  test/fixtures/**/*.pc
   test/fixtures/**/*.project
   test/fixtures/**/.buckconfig
   test/fixtures/**/.gitkeep

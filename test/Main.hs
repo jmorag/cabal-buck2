@@ -74,7 +74,10 @@ tests =
   , ("custom-setup", customSetup)
   , ("reexports", reexports)
   , ("buck2-version", buck2Version)
-  , ("project-overrides", projectOverrides)  , ("same-name", sameName)
+  , ("project-overrides", projectOverrides)
+  , ("pkgconfig", pkgconfig)
+  , ("project-overrides", projectOverrides)
+  , ("same-name", sameName)
   ]
 
 -- | A library and an executable with the same name in one package, and
@@ -136,9 +139,11 @@ runTest exe (name, test) = do
       -- config (which $CABAL_DIR and $CABAL_CONFIG may point to, as in
       -- haskell-ci) are neither used nor changed.
       let cabalDir = dir </> "cabal-dir"
+          -- A fixture can have pkg-config files of its own, in pkgconfig/.
+          pkgConfigPath = dir </> "project" </> "pkgconfig" ++ maybe "" (':' :) (lookup "PKG_CONFIG_PATH" env)
           cabalEnv =
-            [("CABAL_DIR", cabalDir), ("CABAL_CONFIG", cabalDir </> "config")]
-              ++ [kv | kv@(k, _) <- env, k `notElem` ["CABAL_DIR", "CABAL_CONFIG"]]
+            [("CABAL_DIR", cabalDir), ("CABAL_CONFIG", cabalDir </> "config"), ("PKG_CONFIG_PATH", pkgConfigPath)]
+              ++ [kv | kv@(k, _) <- env, k `notElem` ["CABAL_DIR", "CABAL_CONFIG", "PKG_CONFIG_PATH"]]
           run args = do
             (code, out, err) <-
               readCreateProcessWithExitCode
@@ -295,6 +300,9 @@ basic project = do
   -- extra-source-files reach the spec as they are (patterns), for
   -- cabal.bzl to glob.
   lib "'extra_source_files': [\n        'include/*.h',\n    ]" libBzl
+  -- extra-lib-dirs, as configured (so with the directories of any
+  -- pkgconfig-depends), go in the spec for the link.
+  lib "'extra_lib_dirs': [\n                'libs',\n            ]" libBzl
   -- A module's boot file is found next to its source.
   lib "'boot_srcs': {\n                'MyLib': 'src/MyLib.hs-boot',\n            }" libBzl
   noLib "haskell_library(" libBzl
@@ -473,6 +481,25 @@ reexports project = do
   userBzl <- readIn project ("user" </> "BUCK.cabal.bzl")
   assertContains "user/BUCK.cabal.bzl" "'package': 're-lib'" userBzl
   assertNotContains "user/BUCK.cabal.bzl" "base-lib" userBzl
+
+-- | What Cabal's configure makes of @pkgconfig-depends@ and @extra-lib-dirs@ is
+-- in the spec as it is, for the link: also for a component that has no C
+-- sources, which buck2 doesn't run pkg-config for. The fixture has a
+-- @foo.pc@ with its own library and include directories, a define and an
+-- rpath.
+pkgconfig :: Project -> IO ()
+pkgconfig project = do
+  _ <- buck2 project []
+  bzl <- readIn project ("lib" </> "BUCK.cabal.bzl")
+  let spec = assertContains "lib/BUCK.cabal.bzl"
+  spec "'extra_libraries': [\n                'foo',\n            ]" bzl
+  -- The directory of the package's own extra-lib-dirs and then that of pkg-config.
+  spec "'extra_lib_dirs': [\n                'plain',\n                '/opt/foo/lib',\n            ]" bzl
+  spec "'ld_options': [\n                '-Wl,-rpath,/opt/foo/lib',\n            ]" bzl
+  spec "'include_dirs': [\n                '/opt/foo/include',\n            ]" bzl
+  spec "'cc_options': [\n                '-DFOO_ENABLED',\n            ]" bzl
+  -- and for buck2 to run pkg-config for the C sources there are.
+  spec "'pkgconfig': [\n                'foo',\n            ]" bzl
 
 -- | The checkout of haskell-buck2 has to be for this release of cabal-buck2:
 -- if it is not, or doesn't say, the error says which branch is needed.
