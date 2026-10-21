@@ -344,11 +344,11 @@ generateComponent localIndex projectRoot componentLBIs externalBuildTools projec
         Left problems -> skipBecause problems ("library " ++ targetName ++ " (couldn't resolve all its modules)")
         Right (srcs, srcAutogen) ->
           let reexports = [SpecReexport (prettyShow (moduleReexportName r)) (prettyShow original) (specDep <$> from) | (r, Just (from, original)) <- reexportOrigins localIndex pkgDesc lbi clbi lib]
-              -- A library with no modules (a compatibility package, say) has
-              -- nothing to build, which a rule can't have.
+              -- A library with no code at all (a compatibility package, say)
+              -- has nothing to build, which a rule can't have.
               extra :: [(ModuleName.ModuleName, AutogenFile)]
               extra
-                | null srcs = [(ModuleName.fromString "CabalBuck2Empty", emptyModule targetName)]
+                | null srcs && null (cSources bi) && null (cxxSources bi) && null (asmSources bi) && null (cmmSources bi) = [(ModuleName.fromString "CabalBuck2Empty", emptyModule targetName)]
                 | otherwise = []
            in componentTargets
                 (specComponent localIndex externalBuildTools Library targetName bi)
