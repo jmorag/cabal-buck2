@@ -32,7 +32,6 @@ import Prelude ()
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
-import Data.Char (isHexDigit)
 import Data.List (stripPrefix)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -76,7 +75,7 @@ import Distribution.Types.ComponentName (ComponentName (CExeName))
 
 import Distribution.InstalledPackageInfo (parseInstalledPackageInfo)
 import Distribution.Package (HasUnitId (installedUnitId), packageName, packageVersion)
-import Distribution.Simple.BuildPaths (exeExtension)
+import Distribution.Simple.BuildPaths (dllExtension, exeExtension)
 import Distribution.Simple.Compiler
   ( Compiler (compilerProperties)
   , compilerVersion
@@ -181,6 +180,7 @@ generatePrebuilt verbosity projectRoot cabalDirLayout shared depsPlan neededUnit
           , rpGlobalRootAbs = globalRootAbs
           , rpStoreRootAbs = storeRootAbs
           , rpStoreDbRel = makeRelative storeRootAbs storeDB
+          , rpDllExtension = dllExtension (pkgConfigPlatform shared)
           , rpExternal = []
           }
 
@@ -261,31 +261,22 @@ data RepoPaths = RepoPaths
   , rpStoreRootAbs :: FilePath
   , rpStoreDbRel :: FilePath
   -- ^ The store's package db, relative to 'rpStoreRootAbs'.
+  , rpDllExtension :: String
+  -- ^ The extension of a shared library, without the dot: @so@, or @dylib@ on macos.
   , rpExternal :: [(FilePath, FilePath)]
   -- ^ Directories that are neither under GHC's libdir nor the cabal store,
   -- and the symlinks (relative to @third-party\/haskell@) to them, which
   -- they are reached through. See 'externalDirs'.
   }
 
--- | Which of the two package dbs a unit id's @.conf@ lives in - decided
--- entirely by the unit id's own shape, no searching required (unlike the
--- Python predecessor, which had to glob for the store root, not knowing
--- its ABI-tag suffix in advance): GHC's global\/boot packages have a plain
--- @name-version@ id; a package installed to the store gets a
--- hash-suffixed one. (An @-inplace@ id - a package buck2 builds itself -
--- never gets here: see 'generatePrebuilt's plan parameter.)
+-- | Which of the two package dbs a unit id's @.conf@ lives in - found
+-- by looking in the store's db first, then GHC's global one (see
+-- 'readPackage'). The unit id's shape can't be relied on to tell them
+-- apart: on macOS and Windows cabal shortens store unit ids (e.g.
+-- LstLk-4.7.8.4-0e779db1). (An @-inplace@ id - a package buck2 builds
+-- itself - never gets here: see 'generatePrebuilt's plan parameter.)
 data PkgDbKind = GlobalDb | StoreDb
   deriving (Eq)
-
-classifyUnitId :: UnitId -> PkgDbKind
-classifyUnitId uid
-  | hasStoreHashSuffix s = StoreDb
-  | otherwise = GlobalDb
-  where
-    s = unUnitId uid
-    hasStoreHashSuffix rs = case break (== '-') (reverse rs) of
-      (revSuffix, '-' : _) -> length revSuffix >= 20 && all isHexDigit revSuffix
-      _ -> False
 
 -- | A resolved package: its metadata plus which package db it came from
 -- (needed to pick the right @db =@ value in the generated rule, and to
@@ -307,26 +298,32 @@ libraryFiles p =
     ++ [("profiled", f) | f <- rpProfiledLibs p]
     ++ [("shared", f) | (_, f) <- rpSharedLibs p]
 
-confPath :: FilePath -> FilePath -> UnitId -> FilePath
-confPath globalRootAbs storeDB uid = case classifyUnitId uid of
+confPath :: FilePath -> FilePath -> PkgDbKind -> UnitId -> FilePath
+confPath globalRootAbs storeDB kind uid = case kind of
   GlobalDb -> globalRootAbs </> "package.conf.d" </> unUnitId uid <.> "conf"
   StoreDb -> storeDB </> unUnitId uid <.> "conf"
 
 readPackage :: Verbosity -> RepoPaths -> FilePath -> UnitId -> IO (Maybe ResolvedPackage)
 readPackage verbosity paths storeDB uid = do
-  let dbKind = classifyUnitId uid
-      path = confPath (rpGlobalRootAbs paths) storeDB uid
-  exists <- doesFileExist path
-  if not exists
-    then do
+  let storePath = confPath (rpGlobalRootAbs paths) storeDB StoreDb uid
+      globalPath = confPath (rpGlobalRootAbs paths) storeDB GlobalDb uid
+  storeHas <- doesFileExist storePath
+  globalHas <- doesFileExist globalPath
+  case (storeHas, globalHas) of
+    (True, _) -> parseFrom StoreDb storePath
+    (_, True) -> parseFrom GlobalDb globalPath
+    _ -> do
       warn verbosity $
         "cabal buck2: no .conf file for "
           ++ unUnitId uid
-          ++ " (expected at "
-          ++ path
+          ++ " (looked in "
+          ++ storePath
+          ++ " and "
+          ++ globalPath
           ++ "); packages are only found in GHC's global package db and the cabal store, not in other package dbs"
       return Nothing
-    else do
+  where
+    parseFrom dbKind path = do
       contents <- BS.readFile path
       case parseInstalledPackageInfo contents of
         Left errs -> do
@@ -347,7 +344,17 @@ readPackage verbosity paths storeDB uid = do
             if isRts
               then return []
               else findLibs paths (libraryDirs ipi) ["lib" ++ stem ++ "_p" <.> "a" | stem <- hsLibraries ipi]
-          sharedLibs <- findSharedLibs paths ipi
+          -- A Haskell shared library mustn't be linked against the
+          -- RTS: which RTS (threaded or not) is only decided when the
+          -- final executable is, and on macOS, where each symbol is
+          -- bound to the library it was linked against, one loaded
+          -- into a process already running another RTS (GHC itself,
+          -- running a Template Haskell splice) uses its own,
+          -- uninitialized, RTS. Cabal doesn't link against it either.
+          sharedLibs <-
+            if isRts
+              then return []
+              else findSharedLibs paths ipi
           return $ Just (ResolvedPackage ipi uid dbKind staticLibs profiledLibs sharedLibs)
 
 -- | Resolve each candidate filename against @dirs@ in turn, keeping only
@@ -377,7 +384,7 @@ findSharedLibs paths ipi = catMaybes <$> traverse oneStem (hsLibraries ipi)
   where
     dirs = libraryDynDirs ipi ++ libraryDirs ipi
     oneStem stem = do
-      let soname = "lib" ++ stem ++ "-ghc" ++ rpGhcVersion paths ++ ".so"
+      let soname = "lib" ++ stem ++ "-ghc" ++ rpGhcVersion paths <.> rpDllExtension paths
       mpath <- findOne paths dirs soname
       return ((,) soname <$> mpath)
 
