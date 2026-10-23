@@ -20,6 +20,8 @@
     `.buckconfig`.
   * Fix for using a combination of a Cabal `main-is` declaration
     together with `ghc-options: -main-is ...`.
+  * Modules in `other-modules` are now correctly hidden outside the
+    component.
 
 # 0.4.0.0
 
