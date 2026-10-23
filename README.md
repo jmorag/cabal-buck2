@@ -229,18 +229,25 @@ You can find docs on how to write `BUCK` files in the Buck2 docs, e.g. [haskell_
 
 # Build modes
 
-The Buck2 build system has two build modes:
+The Buck2 build system has the following build mode options, which can
+be selected using `-m` on the Buck2 command line (e.g. `-m opt`)
 
-  * `dev`: the default, builds everything with `-O0` and dynamic linking. This is intended to give you the quickest edit-compile-test turnaround.
-  * `opt`: enable `-O` and link statically. This takes longer but the code runs faster.
+  * Optimisation:
+    * `dev`: (default) no optimisation, `-g` for C/C++.
+    * `opt`: adds `-O` for Haskell, `-O3 -DNDEBUG` for C/C++, and also enables
+      `static` unless overridden by `shared`.
+  * Linking:
+    * `shared`: (default) shared libraries, dynamic linking
+    * `static`: static linking, but also builds shared libraries using
+    `-dynamic-too` because those are required for Template Haskell.
+  * Profiling:
+    * `prof`: enables Haskell profiling; also forces `static`.
 
-To build with `opt`, use `-m opt`, e.g.
+To use any of these modes, add them using `-m` on the command line:
 
 ```
 buck2 build my-package:my-program -m opt
 ```
-
-There are other build options that can be selected in a similar way, such as `-m prof` to enable profiling. See `constraints/BUCK` for details.
 
 # Sharing build results (a build cache)
 

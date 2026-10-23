@@ -1,6 +1,7 @@
 # 0.5.0.0
 
   * For `cabal-install` version 3.18
+  * Now works on MacOS X
   * A component's C, C++, assembler and Cmm sources are part of its
     library, as in Cabal: their objects are in the library's archive
     and shared library, rather than in libraries of their own linked
@@ -17,6 +18,8 @@
   * Configurations can be named by a project's own constraints too:
     `named_constraint_settings` in the `[cfg]` section of its
     `.buckconfig`.
+  * Fix for using a combination of a Cabal `main-is` declaration
+    together with `ghc-options: -main-is ...`.
 
 # 0.4.0.0
 
