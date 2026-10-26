@@ -10,7 +10,7 @@ import Safe (headMay)
 $(makeGreeter "greet")
 
 -- This splice uses the 'makeGreeters' TH defined in this library
--- itself. It currently does not work with "buck2 build -m prof".
+-- itself.
 $(makeGreeters ["hello"])
 
 addPoints :: Int -> Int -> IO Int
