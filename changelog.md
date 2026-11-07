@@ -20,6 +20,7 @@
     the packages it depends on that buck2 builds. Haskell rules have a
     `data_dirs` attribute for this, and `cabal-buck2/packages.bzl` has
     `DATA_PACKAGES`.
+  * `--source-deps` supports `source-repository-package`s.
 
 # 0.5.0.0
 
